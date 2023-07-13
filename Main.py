@@ -1,53 +1,88 @@
 from tensorflow.keras.callbacks import LambdaCallback
-from tensorflow.keras.models import Model, load_model, Sequential
-from tensorflow.keras.layers import Dense, Activation, Dropout, Input, Masking
-from tensorflow.keras.layers import LSTM
-from tensorflow.keras.utils import get_file
-from tensorflow.keras.preprocessing.sequence import pad_sequences
-import sys
-import io
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, LSTM, Embedding
+from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.layers import Dropout
+
+import json
 import numpy as np
+import os
 
-print('hello')
+# EDIT ADD-ON
+addon = "_2layers_35dropout_200epochs"
 
+# Path to the directory containing individual song files
+directory = 'responses/txt'
 
-def adjust_sequence_length(sequence, desired_length):
-    if len(sequence) > desired_length:
-        # If the sequence is too long, truncate it
-        return sequence[:desired_length]
-    elif len(sequence) < desired_length:
-        # If the sequence is too short, pad it with spaces
-        return sequence.ljust(desired_length)
-    else:
-        # If the sequence is already the right length, return it as is
-        return sequence
+# Read and process each song file
+songs = []
+for filename in os.listdir(directory):
+    file_path = os.path.join(directory, filename)
+    with open(file_path, 'r') as file:
+        song_text = file.read()
+        songs.append(song_text)
 
+# Tokenize the songs into words
+tokenizer = Tokenizer()
+tokenizer.fit_on_texts(songs)
+sequences = tokenizer.texts_to_sequences(songs)
 
-sequence = ''.join([chr(i) for i in range(97, 123)]) + " "
-sequence_length = len(sequence)
-num_unique_chars = len(set(sequence))
-char_to_int = {ch: i for i, ch in enumerate(sequence)}
-int_to_char = {i: ch for i, ch in enumerate(sequence)}
+# Prepare the training data
+vocab_size = len(tokenizer.word_index) + 1
+sequence_length = 10  # Adjust this value as needed
 
+input_sequences = []
+output_sequences = []
+for sequence in sequences:
+    for i in range(sequence_length, len(sequence)):
+        input_sequences.append(sequence[i-sequence_length:i])
+        output_sequences.append(sequence[i])
+
+X = np.array(input_sequences)
+y = np.array(output_sequences)
+y = np.eye(vocab_size)[y]
+
+# Create the LSTM model
 model = Sequential()
-model.add(LSTM(128, input_shape=(sequence_length, num_unique_chars)))
-model.add(Dense(num_unique_chars))
-model.add(Activation('softmax'))
+model.add(Embedding(vocab_size, 128, input_length=sequence_length))
+model.add(LSTM(128, return_sequences=True))
+model.add(Dropout(0.35))
+model.add(LSTM(128))
+model.add(Dropout(0.35))
+model.add(Dense(vocab_size, activation='softmax'))
 model.compile(loss='categorical_crossentropy', optimizer='adam')
 
-generated_sequence = adjust_sequence_length(
-    "the quick brown fox", sequence_length)
+# Generate text callback
 
-for i in range(10000):  # Generate 100 characters
-    x_pred = np.zeros((1, sequence_length, num_unique_chars))
-    for t, char in enumerate(generated_sequence):
-        x_pred[0, t, char_to_int[char]] = 1.
 
-    predictions = model.predict(x_pred, verbose=0)[0]
-    next_index = np.argmax(predictions)
-    next_char = int_to_char[next_index]
+def generate_text(epoch, _):
+    generated_text = ''
+    start_sequence = np.random.randint(0, len(X))
+    input_sequence = X[start_sequence]
 
-    generated_sequence = generated_sequence[1:] + next_char
+    for _ in range(100):  # Generate 100 words
+        x_pred = np.expand_dims(input_sequence, axis=0)
+        predictions = model.predict(x_pred, verbose=0)[0]
+        next_index = np.argmax(predictions)
+        next_word = tokenizer.index_word[next_index]
 
-    sys.stdout.write(next_char)
-    sys.stdout.flush()
+        generated_text += next_word + ' '
+        input_sequence = np.append(
+            input_sequence[1:], np.expand_dims(next_index, axis=0))
+
+    print(generated_text)
+
+
+# Define the callback for text generation during training
+generate_text_callback = LambdaCallback(on_epoch_end=generate_text)
+
+# Train the LSTM model
+model.fit(X, y, epochs=200, batch_size=128, callbacks=[generate_text_callback])
+
+# Save the trained model
+model.save(f'song_generator_model{addon}.h5')
+
+# Save the tokenizer as JSON
+tokenizer_json = tokenizer.to_json()
+with open(f'tokenizer{addon}.json', 'w') as tokenizer_file:
+    tokenizer_file.write(json.dumps(tokenizer_json))
