@@ -1,18 +1,46 @@
+import tensorflow as tf
+import tensorflow_addons as tfa
+import json
+import numpy as np
+import os
+
 from tensorflow.keras.callbacks import LambdaCallback
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, LSTM, Embedding
 from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.layers import Dropout
+from tensorflow.keras.layers import Attention
+from tensorflow.keras.layers import Layer
 
-import json
-import numpy as np
-import os
+
+class AttentionLayer(Layer):
+    def __init__(self, **kwargs):
+        super(AttentionLayer, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+        super(AttentionLayer, self).build(input_shape)
+
+    def call(self, inputs):
+        q = inputs
+        k = inputs
+        v = inputs
+        matmul_qk = tf.matmul(q, k, transpose_b=True)
+        dk = tf.cast(tf.shape(k)[-1], tf.float32)
+        scaled_attention_logits = matmul_qk / tf.math.sqrt(dk)
+        attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)
+        output = tf.matmul(attention_weights, v)
+        return output
+
+    def compute_output_shape(self, input_shape):
+        return input_shape
+
 
 # EDIT ADD-ON
 addon = "_2layers_35dropout_200epochs"
 
 # Path to the directory containing individual song files
 directory = 'responses/txt'
+temperature = 0.80
 
 # Read and process each song file
 songs = []
@@ -47,12 +75,11 @@ model = Sequential()
 model.add(Embedding(vocab_size, 128, input_length=sequence_length))
 model.add(LSTM(128, return_sequences=True))
 model.add(Dropout(0.35))
+model.add(AttentionLayer())
 model.add(LSTM(128))
-model.add(Dropout(0.35))
+model.add(Dropout(0.20))
 model.add(Dense(vocab_size, activation='softmax'))
 model.compile(loss='categorical_crossentropy', optimizer='adam')
-
-# Generate text callback
 
 
 def generate_text(epoch, _):
@@ -63,7 +90,19 @@ def generate_text(epoch, _):
     for _ in range(100):  # Generate 100 words
         x_pred = np.expand_dims(input_sequence, axis=0)
         predictions = model.predict(x_pred, verbose=0)[0]
-        next_index = np.argmax(predictions)
+
+        # Apply temperature
+        predictions = np.log(predictions) / temperature
+        exp_preds = np.exp(predictions)
+        predictions = exp_preds / np.sum(exp_preds)
+
+        # Apply top-k sampling
+        top_k = 10  # Adjust as needed
+        top_k_indices = np.argpartition(predictions, -top_k)[-top_k:]
+        top_k_probs = predictions[top_k_indices]
+        top_k_probs = top_k_probs / np.sum(top_k_probs)  # Re-normalize
+
+        next_index = np.random.choice(top_k_indices, p=top_k_probs)
         next_word = tokenizer.index_word[next_index]
 
         generated_text += next_word + ' '
