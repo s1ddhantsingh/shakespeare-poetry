@@ -6,11 +6,10 @@ from tensorflow.keras.preprocessing.text import tokenizer_from_json
 
 
 # Load the tokenizer from the JSON file
+addon = ""
 
-addon = "_2layers_35dropout_200epochs"
 
-
-tokenizer_json = f'tokenizer{addon}.json'
+tokenizer_json = f'5/tokenizer.json'
 
 with open(tokenizer_json, 'r') as tokenizer_file:
     tokenizer_config = json.load(tokenizer_file)
@@ -18,7 +17,7 @@ with open(tokenizer_json, 'r') as tokenizer_file:
 tokenizer = tokenizer_from_json(tokenizer_config)
 
 # Load the trained model
-model = load_model(f'song_generator_model{addon}.h5')
+model = load_model(f'5/song_generator_model_BRNN_and_multihead_ATTENTION.h5')
 
 
 def generate_text(model, tokenizer, sequence_length, seed_text, num_words):
@@ -44,7 +43,7 @@ def generate_text(model, tokenizer, sequence_length, seed_text, num_words):
     return generated_text
 
 
-seed_text = "Let's jump in and learn about the multi head attention mechanism. "
+seed_text = ""
 num_words = 1000
 generated_text = generate_text(
     model, tokenizer, sequence_length=10, seed_text=seed_text, num_words=num_words)
